@@ -1,0 +1,11 @@
+paths:
+  data_root: "/root/autodl-tmp/autodl/CowepsFinal/data"
+  processed_dir: "/root/autodl-tmp/autodl/CowepsFinal/data/processed"
+  scores_dir: "/root/autodl-tmp/autodl/CowepsFinal/data/scores"
+
+manifests:
+  validate: "/root/autodl-tmp/autodl/CowepsFinal/data/testing/locked/student_test_id.csv"
+
+inference:
+  skip_qscore: true
+  batch_size: 32

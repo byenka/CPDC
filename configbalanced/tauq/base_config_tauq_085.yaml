@@ -1,0 +1,236 @@
+# ============================================================================
+# CoWePS v2.5 - BASE CONFIG (Backward-compatible dengan v2.4)
+# ============================================================================
+# Catatan:
+# - Kunci yang dipakai kode v2.4: paths.processed_dir, paths.data_root,
+#   image_size, device, random_seed, inference.batch_size.
+# - Kunci baru v2.5: tiering, calibration, robust_loss, sampling, evaluation,
+#   offline (kebijakan bobot lokal-only), dry_run, lr_linear.
+#   (Aman diabaikan jika kode lama belum membaca.)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# REPRODUCIBILITY & RUNTIME
+# ----------------------------------------------------------------------------
+random_seed: 42
+device: "cuda"                 # "cuda" | "cpu"
+image_size: 512                # default image size untuk DRDataset (classifier & AE)
+num_workers: 8                 # DataLoader workers
+pin_memory: true
+
+# ----------------------------------------------------------------------------
+# PATHS (ABSOLUTE) - konsisten dengan struktur ProjectCowepsF Anda
+# ----------------------------------------------------------------------------
+paths:
+  data_root: "/root/autodl-tmp/_CODE/data"
+  raw_dir: "/root/autodl-tmp/_CODE/data/raw"
+  processed_dir: "/root/autodl-tmp/_CODE/data/processed"
+
+  outputs_dir: "/root/autodl-tmp/_CODE/outputs"
+  logs_dir: "/root/autodl-tmp/_CODE/outputs/logs"
+  models_dir: "/root/autodl-tmp/_CODE/models"
+
+  # Direktori scoring & final dataset
+  scores_dir: "/root/autodl-tmp/_CODE/data/scores"
+  final_dir: "/root/autodl-tmp/_CODE/data/final"
+
+  # Folder ungradable untuk kalibrasi kualitas (dipakai di inference_scoring.py)
+  ungradable_folder: "/root/autodl-tmp/_CODE/data/raw/5"
+
+# ----------------------------------------------------------------------------
+# DATA MANIFEST (dipakai oleh Fase 0 & Train/Val)
+# ----------------------------------------------------------------------------
+manifests:
+  master_list: "/root/autodl-tmp/_CODE/data/processed/master_list.csv"
+  # Untuk Fase 5 (student): gunakan hasil progressive sampling Stage2 sebagai train set
+  train: "/root/autodl-tmp/_CODE/data/processed/student_cleanset_balanced.csv"
+  # Plan B: pisahkan manifest validasi label (klasifikasi) vs validasi quality (AE ROC Good-set)
+  validate_label: "/root/autodl-tmp/_CODE/data/processed/dokter_validation.csv"
+  validate_quality: "/root/autodl-tmp/_CODE/data/processed/val_quality_good.csv"
+
+  # Backward-compat: kunci legacy. Default diarahkan ke validasi label.
+  validate: "/root/autodl-tmp/_CODE/data/processed/dokter_validation.csv"
+  # Opsional (untuk tooling/evaluator eksternal)
+  test_id: "/root/autodl-tmp/_CODE/data/testing/student_test_id_eyepacs_v2.csv"
+  test_ood: "/root/autodl-tmp/_CODE/data/testing/student_test_ood.csv"
+  # optional: untuk audit/snapshot
+  training_manifest: "/root/autodl-tmp/_CODE/data/processed/training_manifest.csv"
+  validation_manifest: "/root/autodl-tmp/_CODE/data/processed/validation_manifest.csv"
+
+# ----------------------------------------------------------------------------
+# DATA (ALIAS BACKWARD-COMPAT UNTUK KODE LAMA v2.4)
+# ----------------------------------------------------------------------------
+data:
+  raw_data_dir: "/root/autodl-tmp/_CODE/data/raw"
+  processed_dir: "/root/autodl-tmp/_CODE/data/processed"
+  # kualitas / scoring (alias dari paths + inference)
+  ungradable_data_path: "/root/autodl-tmp/_CODE/data/raw/5"
+  scores_output_path: "/root/autodl-tmp/_CODE/data/scores/full_inference_results.csv"
+
+# ----------------------------------------------------------------------------
+# NORMALIZATION (dipakai DRDataset)
+# ----------------------------------------------------------------------------
+normalization:
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+
+# ----------------------------------------------------------------------------
+# INFERENCE (dipakai run_inference.py / inference_scoring.py)
+# ----------------------------------------------------------------------------
+inference:
+  skip_qscore: False
+  batch_size: 32
+  save_scores_csv: "/root/autodl-tmp/_CODE/data/scores/full_inference_results.csv"
+  ae_config: "configs/autoencoder_config.yaml"
+  # Hasil kalibrasi suhu (T-scaling) disimpan per-model di config model masing-masing
+
+# ----------------------------------------------------------------------------
+# AUTOENCODER (opsional untuk Q-score; path bobot AE bila diperlukan)
+# ----------------------------------------------------------------------------
+autoencoder:
+  #ini untuk latihan autoencoder
+  #weights_path: "/root/autodl-tmp/.autodl/ProjectCowepsF/models/autoencoder/autoencoder_final.pth"
+  #ini untuk dipakai setelah autoencoder selesai
+  weights_path: "/root/autodl-tmp/_CODE/models/autoencoder/best_autoencoder.pth"
+  loss: "mse"
+  image_size: 512
+
+# ----------------------------------------------------------------------------
+# LOGGING
+# ----------------------------------------------------------------------------
+logging:
+  save_logs: true
+  verbose: true
+
+# ----------------------------------------------------------------------------
+# FLAGS (ekstensi; aman diabaikan jika belum dipakai kode)
+# ----------------------------------------------------------------------------
+flags:
+  enable_t_scaling: true
+  enable_roc_quality_calibration: true
+  use_amp_default: true
+
+# =========================
+# ====== v2.5 ADD-ONS =====
+# =========================
+
+# ----------------------------------------------------------------------------
+# OFFLINE WEIGHTS POLICY (Wajib: server China blokir download)
+# ----------------------------------------------------------------------------
+offline:
+  only_use_local_weights: true
+  pretrained_root: "/root/autodl-tmp/_CODE/pretrained_models"
+  # Catatan: tiap config model harus punya kunci:
+  #   model.local_weights_path: "<path relatif/absolut .pth>"
+  # dan loader WAJIB menolak fallback download.
+
+# ----------------------------------------------------------------------------
+# CALIBRATION (harus diterapkan sebelum threshold/tiering)
+# ----------------------------------------------------------------------------
+calibration:
+  enable: true
+  method: "temperature"         # temperature | none
+  per_source: true              # T terpisah per source (EyePACS/APTOS/Messidor0_4/...)
+  fallback_T: 1.0               # jika T per-source belum ada, pakai 1.0
+
+# ----------------------------------------------------------------------------
+# TIERING (multi-metrik): A (clean) / B (medium) / C (hard-ambiguous)
+# ----------------------------------------------------------------------------
+tiering:
+  use: true
+  metrics: ["entropy", "margin", "agreement"]   # agreement opsional jika ada model pembanding
+  thresholds:
+    entropy:
+      a_max: 0.60          # ≤ 0.60 → Tier A
+      b_max: 0.95          # (0.60, ≤0.95] → Tier B
+    margin:
+      a_min: 0.35          # ≥ 0.35 → Tier A
+      b_min: 0.10          # [0.10, 0.35) → Tier B; sisanya C
+    agreement:
+      a_min: 0.80          # ≥ 0.80 → Tier A (jika tersedia)
+      b_min: 0.60          # [0.60, 0.80) → Tier B
+  outputs:
+    dir: "/root/autodl-tmp/_CODE/data/processed"
+    tier_a: "tier_A.csv"
+    tier_b: "tier_B.csv"
+    tier_c: "tier_C.csv"
+
+# ----------------------------------------------------------------------------
+# SAMPLING (domain×kelas re-balance + curriculum progresif)
+# ----------------------------------------------------------------------------
+sampling:
+  progressive_curriculum: true
+  stages:
+    - name: "stage0_tierA_only"
+      include_tiers: ["A"]
+      tier_weights: {A: 1.0, B: 0.0, C: 0.0}
+    - name: "stage1_tierA_B"
+      include_tiers: ["A", "B"]
+      tier_weights: {A: 1.0, B: 0.5, C: 0.0}
+    - name: "stage2_tierA_B_Csubset"
+      include_tiers: ["A", "B", "C"]
+      tier_weights: {A: 1.0, B: 0.7, C: 0.2}
+      c_clip:
+        entropy_max: 1.10     # batasi C yang terlalu chaos
+        min_per_class: 20     # jaga representasi kelas 3–4
+  cleanset:
+    enabled: true
+    min_label_confidence: 0.90   # R ≥ 0.90
+    max_entropy: 0.80            # opsional, bisa null
+    min_margin: 0.30             # opsional, bisa null
+    min_q_score: 0.85
+    min_per_class: 0          # jaga minimal per kelas dalam CleanSet
+    output_name: "student_cleanset_train.csv"
+    label_col: "label"
+    # Label source control
+    # - original  : do not change labels (filtering only)
+    # - predicted : overwrite label using argmax of selected probability columns from the scores CSV
+    label_source: "predicted"
+    predicted_prob_source: "avg"   # avg (p0..pK) | D (p*_D) | R (p*_R)
+    keep_original_label: true
+  quotas:
+    by_domain_class: true
+    min_per_domain_class: 10   # kuota minimum per kombinasi domain×kelas pada train
+
+# ----------------------------------------------------------------------------
+# ROBUST LOSS (aktif saat training—kode trainer membaca ini)
+# ----------------------------------------------------------------------------
+robust_loss:
+  # Global robust loss untuk SEMUA student (Stage0/Stage2/CleanSet):
+  # pastikan semua config model tidak override loss sendiri.
+  type: "bi_tempered"          # bi_tempered | symmetric_ce | gce | cross_entropy
+  params:
+    t1: 0.7
+    t2: 1.2
+    label_smoothing: 0.05
+  warmup_epochs: 2             # pakai CE murni 2 epoch pertama jika perlu
+
+# ----------------------------------------------------------------------------
+# EVALUATION (ID vs OOD + kalibrasi)
+# ----------------------------------------------------------------------------
+evaluation:
+  metrics: ["balanced_accuracy", "f1_macro", "ece", "brier"]
+  report_dir: "/root/autodl-tmp/_CODE/outputs/reports"
+  breakdown:
+    by_source: true
+    by_class: true
+  id_split_name: "val_ID"      # opsional; jika Anda menamai split demikian
+  ood_split_name: "val_OOD"    # opsional; jika Anda menamai split demikian
+
+# ----------------------------------------------------------------------------
+# DRY-RUN (validasi pipeline 10% sebelum full run)
+# ----------------------------------------------------------------------------
+dry_run:
+  enabled: false
+  fraction: 0.10
+  stratify_by: ["source", "label"]
+
+# ----------------------------------------------------------------------------
+# LR LINEAR RULE (opsional di level base agar konsisten lintas model)
+# ----------------------------------------------------------------------------
+lr_linear:
+  enabled: true
+  base_batch_size: 32
+  base_grad_accum: 1
+  cap_max_factor: 2.0
+  round_to: 1.0e-7

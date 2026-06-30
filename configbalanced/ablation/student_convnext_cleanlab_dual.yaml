@@ -1,0 +1,83 @@
+random_seed: 2026
+paths:
+  checkpoints_dir: runs/student_convnext_codec_matched/X20260103_1f3b6c2d
+distillation:
+  enable: false
+dry_run:
+  enabled: false
+  fraction: 0.1
+  stratify_by:
+  - label
+data:
+  master_list_path: data/processed/master_list.csv
+  train_manifest_path: data/training/ablation/train_cleanlab_dual.csv
+  validation_manifest_path: data/processed/val_id.csv
+  test_id_manifest_path: data/testing/locked/student_test_id.csv
+  test_ood_manifest_path: data/testing/locked/student_test_ood.csv
+  ungradable_data_path: data/raw/5
+  scores_output_path: data/scores/student_convnext_codec_matched_scores.csv
+model:
+  model_name: convnext_base.fb_in22k
+  local_weights_path: models/convnext_base_v25_refine/convnext_base_best_byBA.pth
+  output_dir: runs/student_convnext_codec_matched/X20260103_1f3b6c2d
+  checkpoint_name: student_convnext_codec_matched_bestSUP_byBA.pth
+  num_classes: 5
+  calibration_path: runs/student_convnext_codec_matched/X20260103_1f3b6c2d/T_optimal.pth
+image_size: 512
+training:
+  optimizer: AdamW
+  learning_rate: 1.2e-05
+  weight_decay: 0.08
+  label_smoothing: 0.05
+  num_epochs: 10
+  batch_size: 24
+  val_batch_size: 128
+  gradient_accumulation_steps: 1
+  mixed_precision: true
+  channels_last: true
+  scheduler: CosineAnnealingLR
+  scheduler_params:
+    T_max: 10
+    eta_min: 1.0e-06
+  warmup_epochs: 0
+  max_grad_norm: 1.0
+  use_amp: true
+  freeze_backbone:
+    enabled: true
+    epochs: 1
+    head_lr_mult: 3.0
+    backbone_lr_mult: 1.0
+    head_keywords:
+    - head
+    - classifier
+    - fc
+    - last_linear
+  early_stopping_patience: 3
+  monitor_metric: balanced_accuracy
+  train_manifest: data/training/ablation/train_cleanlab_dual.csv
+  val_manifest: data/processed/val_id.csv
+  test_id_manifest: data/testing/locked/student_test_id.csv
+  test_ood_manifest: data/testing/locked/student_test_ood.csv
+  lr_linear:
+    enabled: true
+    base_batch_size: 24
+    base_grad_accum: 1
+    cap_max_factor: 2.0
+    round_to: 1.0e-07
+augmentation:
+  horizontal_flip_prob: 0.5
+  vertical_flip_prob: 0.0
+  rotation_degrees: 7.0
+  random_erasing:
+    probability: 0.0
+validation:
+  eval_every_n_epochs: 1
+  save_best_only: true
+logging:
+  log_dir: runs/student_convnext_codec_matched/X20260103_1f3b6c2d/logs
+  save_logs: true
+  verbose: true
+checkpointing:
+  save_by: balanced_accuracy
+  save_top_k: 2
+  monitor_split: val
